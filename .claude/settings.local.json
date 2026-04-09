@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(mkdir -p /Users/KaramAlbataineh/Desktop/CI:CD/tests)",
-      "Bash(mkdir -p /Users/KaramAlbataineh/Desktop/CI:CD/.github/workflows)"
+      "Bash(mkdir -p /Users/KaramAlbataineh/Desktop/CI:CD/.github/workflows)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npm install:*)",
+      "Bash(export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin\")",
+      "Bash(/opt/homebrew/bin/npm install:*)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//Users/KaramAlbataineh/.nvm/versions/**)",
+      "Read(//Users/KaramAlbataineh/.nvm/alias/**)",
+      "Bash(export PATH=\"/opt/homebrew/bin:$PATH\")",
+      "Bash(gh api:*)"
     ]
   }
 }
