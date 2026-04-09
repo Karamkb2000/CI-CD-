@@ -1,15 +1,15 @@
 # ============================================================
-# CI WORKFLOW: Continuous Integration
+# CI — Continuous Integration
 # ============================================================
 # TRIGGERS:
-#   - Every push to main or develop
+#   - Every push to any branch
 #   - Every Pull Request targeting main
 #
-# WHAT IT DOES:
-#   1. Lints the code (code quality check)
-#   2. Runs tests across MULTIPLE Node.js versions (matrix)
-#   3. Uses CACHING to speed up runs
-#   4. Calls the REUSABLE test workflow
+# JOBS:
+#   1. Lint     → check code style and syntax
+#   2. Test     → run tests on Node 16, 18, 20 in parallel
+#
+# CD will NOT start until this workflow passes on main.
 # ============================================================
 
 name: CI - Continuous Integration
@@ -27,8 +27,7 @@ jobs:
 
   # ------------------------------------------------------------
   # JOB 1: Lint
-  # Checks code style and syntax errors BEFORE running tests
-  # Fast feedback — if lint fails, no point running tests
+  # Checks code quality before wasting time running tests
   # ------------------------------------------------------------
   lint:
     name: Lint Code
@@ -43,7 +42,6 @@ jobs:
         with:
           node-version: "18"
 
-      # Cache for lint job too
       - name: Cache node_modules
         uses: actions/cache@v3
         id: cache-deps
@@ -62,43 +60,24 @@ jobs:
 
 
   # ------------------------------------------------------------
-  # JOB 2: Matrix Test
-  # Runs tests on Node.js 16, 18, and 20 IN PARALLEL
-  #
-  # WHY MATRIX?
-  #   Your app may be deployed on different Node versions.
-  #   Matrix ensures it works on ALL of them simultaneously.
-  #
-  # RESULT: 3 parallel jobs run at the same time → faster feedback
+  # JOB 2: Test (Matrix)
+  # Runs tests on Node 16, 18, 20 in parallel
+  # Only starts after lint passes
   # ------------------------------------------------------------
   test:
-    name: "Test - Node ${{ matrix.node-version }} on ${{ matrix.os }}"
-    runs-on: ${{ matrix.os }}
-    needs: lint   # Only run if lint passes
+    name: "Test — Node ${{ matrix.node-version }}"
+    runs-on: ubuntu-latest
+    needs: lint
 
     strategy:
-      # fail-fast: false means if Node 16 fails, Node 18 and 20 still run
-      # This gives you a full picture of what broke where
       fail-fast: false
       matrix:
         node-version: ["16", "18", "20"]
-        os: [ubuntu-latest, windows-latest]
-
-        # EXCLUDE a specific combination (e.g. Node 16 on Windows is not supported)
-        exclude:
-          - os: windows-latest
-            node-version: "16"
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # -------------------------------------------------------
-      # CACHING DEMO
-      # Cache key = node version + OS + hash of package-lock.json
-      # If package-lock.json changes → new cache key → fresh install
-      # If nothing changes → cache restored → install skipped
-      # -------------------------------------------------------
       - name: Cache node_modules
         uses: actions/cache@v3
         id: cache-deps
@@ -120,46 +99,10 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Upload coverage (only for Node 18 on Ubuntu)
-        if: matrix.node-version == '18' && matrix.os == 'ubuntu-latest'
+      - name: Upload coverage report
+        if: matrix.node-version == '18'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage/
           retention-days: 7
-
-
-  # ------------------------------------------------------------
-  # JOB 3: Call Reusable Workflow
-  # Shows how a caller workflow uses workflow_call
-  # ------------------------------------------------------------
-  test-reusable:
-    name: Test via Reusable Workflow
-    needs: lint
-    uses: ./.github/workflows/reusable-test.yml
-    with:
-      node-version: "18"
-      upload-coverage: true
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-
-  # ------------------------------------------------------------
-  # JOB 4: CI Summary
-  # A final job that only runs if ALL other jobs succeed
-  # This is the "gate" — if this passes, CI is green
-  # ------------------------------------------------------------
-  ci-success:
-    name: CI Passed
-    runs-on: ubuntu-latest
-    needs: [lint, test, test-reusable]
-
-    steps:
-      - name: All checks passed
-        run: |
-          echo "=========================================="
-          echo "  CI PASSED - Safe to deploy!"
-          echo "  Lint:     OK"
-          echo "  Tests:    OK (Node 16, 18, 20)"
-          echo "  Coverage: Uploaded"
-          echo "=========================================="
