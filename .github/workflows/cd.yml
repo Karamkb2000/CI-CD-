@@ -95,7 +95,6 @@ jobs:
 
     environment:
       name: staging
-      url: https://staging.my-app.com
 
     steps:
       - name: Checkout code
@@ -163,7 +162,6 @@ jobs:
 
     environment:
       name: production
-      url: https://my-app.com
 
     steps:
       - name: Checkout code
