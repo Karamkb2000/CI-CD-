@@ -1,3 +1,4 @@
+// Simple Express.js REST API — used as a CI/CD demo app for Session 2
 const express = require("express");
 const app = express();
 
