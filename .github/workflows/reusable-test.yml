@@ -1,0 +1,90 @@
+# ============================================================
+# REUSABLE WORKFLOW: run-tests
+# ============================================================
+# This workflow is NOT triggered directly.
+# Other workflows call it using: workflow_call
+#
+# WHY reusable workflows?
+#   - Write the test logic ONCE, use it in CI, CD, and release
+#   - If the test steps change, update ONE file only
+#   - Keeps other workflow files clean and short
+# ============================================================
+
+name: Reusable - Run Tests
+
+on:
+  workflow_call:
+    # --- INPUTS: values the caller workflow can pass in ---
+    inputs:
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        default: "18"
+        type: string
+      upload-coverage:
+        description: "Whether to upload coverage report as artifact"
+        required: false
+        default: false
+        type: boolean
+
+    # --- SECRETS: secrets the caller workflow can pass in ---
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+    # --- OUTPUTS: values this workflow sends back to the caller ---
+    outputs:
+      test-result:
+        description: "Pass or Fail"
+        value: ${{ jobs.test.outputs.result }}
+
+jobs:
+  test:
+    name: "Run Tests (Node ${{ inputs.node-version }})"
+    runs-on: ubuntu-latest
+
+    outputs:
+      result: ${{ steps.set-result.outputs.result }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -------------------------------------------------------
+      # CACHING: Save node_modules between runs
+      # The cache key is based on the OS + node version + package-lock.json hash
+      # If package-lock.json hasn't changed → cache HIT → skip npm install
+      # -------------------------------------------------------
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        id: cache-deps
+        with:
+          path: node_modules
+          key: node-${{ inputs.node-version }}-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            node-${{ inputs.node-version }}-${{ runner.os }}-
+
+      - name: Setup Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies
+        # Only run if cache was NOT hit
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm test
+
+      - name: Upload coverage report
+        if: ${{ inputs.upload-coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-node${{ inputs.node-version }}
+          path: coverage/
+          retention-days: 7
+
+      - name: Set result output
+        id: set-result
+        run: echo "result=pass" >> $GITHUB_OUTPUT

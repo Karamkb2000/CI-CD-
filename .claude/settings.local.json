@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /Users/KaramAlbataineh/Desktop/CI:CD/tests)",
+      "Bash(mkdir -p /Users/KaramAlbataineh/Desktop/CI:CD/.github/workflows)"
+    ]
+  }
+}

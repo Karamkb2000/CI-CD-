@@ -1,0 +1,210 @@
+# ============================================================
+# CD WORKFLOW: Continuous Deployment
+# ============================================================
+# TRIGGERS:
+#   - Push to main branch ONLY
+#
+# DEPLOYMENT FLOW:
+#   main push
+#     ↓
+#   [1] Run tests (reusable workflow)
+#     ↓
+#   [2] Deploy to STAGING (automatic)
+#     ↓
+#   [3] Smoke test staging
+#     ↓
+#   [4] Wait for MANUAL APPROVAL  ← human reviews staging
+#     ↓
+#   [5] Deploy to PRODUCTION (after approval)
+#
+# ENVIRONMENTS SETUP (do this in GitHub first!):
+#   GitHub Repo → Settings → Environments
+#   Create:
+#     - "staging"   (no protection rules)
+#     - "production" (add Required Reviewers → add yourself)
+# ============================================================
+
+name: CD - Continuous Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  # ------------------------------------------------------------
+  # JOB 1: Run Tests Before Any Deployment
+  # Uses our reusable workflow — no duplication!
+  # ------------------------------------------------------------
+  run-tests:
+    name: Run Tests
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      node-version: "18"
+      upload-coverage: false
+
+
+  # ------------------------------------------------------------
+  # JOB 2: Deploy to Staging
+  # Runs AUTOMATICALLY after tests pass
+  # Uses the "staging" environment
+  # ------------------------------------------------------------
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: run-tests
+
+    # This links the job to the GitHub Environment named "staging"
+    # GitHub will show environment status on the repo page
+    environment:
+      name: staging
+      url: https://staging.my-app.com   # shown as a link in GitHub UI
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        id: cache-deps
+        with:
+          path: node_modules
+          key: node-18-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Build application
+        run: |
+          echo "Building application..."
+          echo "BUILD_VERSION=${{ github.sha }}" >> $GITHUB_ENV
+
+      # STAGING SECRETS: Use environment-specific secrets
+      # Set these in: GitHub → Settings → Environments → staging → Secrets
+      - name: Deploy to Staging Server
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}         # environment secret
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}     # environment secret
+          APP_ENV: staging
+        run: |
+          echo "Deploying to STAGING..."
+          echo "Host:    $STAGING_HOST"
+          echo "Version: ${{ github.sha }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          # In real life, this would be:
+          # ssh -i $DEPLOY_KEY user@$STAGING_HOST "cd /app && git pull && npm ci && pm2 restart app"
+          echo "Deploy to staging complete!"
+
+      - name: Notify deployment
+        run: |
+          echo "Staging deployment successful!"
+          echo "URL: https://staging.my-app.com"
+
+
+  # ------------------------------------------------------------
+  # JOB 3: Smoke Test on Staging
+  # Quick checks AFTER staging deploy to verify it's alive
+  # ------------------------------------------------------------
+  smoke-test-staging:
+    name: Smoke Test Staging
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    steps:
+      - name: Wait for staging to be ready
+        run: sleep 10
+
+      - name: Check health endpoint
+        run: |
+          echo "Running smoke tests on staging..."
+          # In real life:
+          # curl -f https://staging.my-app.com/health || exit 1
+          echo "GET /health → 200 OK"
+          echo "GET /       → 200 OK"
+          echo "Smoke tests passed!"
+
+
+  # ------------------------------------------------------------
+  # JOB 4: Deploy to Production
+  # Requires MANUAL APPROVAL via GitHub Environments
+  #
+  # HOW APPROVAL WORKS:
+  #   1. This job reaches the "production" environment
+  #   2. GitHub PAUSES the workflow and sends email/notification
+  #      to the required reviewers
+  #   3. Reviewer goes to GitHub Actions → clicks "Review deployments"
+  #   4. Reviewer approves or rejects
+  #   5. If approved → job continues
+  #   6. If rejected → job fails
+  # ------------------------------------------------------------
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: smoke-test-staging
+
+    # This links to the "production" environment which has Required Reviewers set
+    # The workflow will PAUSE here and wait for a human to approve
+    environment:
+      name: production
+      url: https://my-app.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        id: cache-deps
+        with:
+          path: node_modules
+          key: node-18-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: npm ci
+
+      # PRODUCTION SECRETS: Separate from staging secrets!
+      # Set in: GitHub → Settings → Environments → production → Secrets
+      - name: Deploy to Production Server
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}         # production environment secret
+          PROD_HOST: ${{ secrets.PROD_HOST }}           # production environment secret
+          APP_ENV: production
+        run: |
+          echo "======================================"
+          echo "  DEPLOYING TO PRODUCTION"
+          echo "  Approved by: ${{ github.actor }}"
+          echo "  Version:     ${{ github.sha }}"
+          echo "  Time:        $(date)"
+          echo "======================================"
+          # In real life:
+          # ssh -i $DEPLOY_KEY user@$PROD_HOST "cd /app && git pull && npm ci && pm2 restart app"
+          echo "Production deploy complete!"
+
+      - name: Post-deployment smoke test
+        run: |
+          echo "Running production health check..."
+          # curl -f https://my-app.com/health || exit 1
+          echo "Production is healthy!"
+
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Production |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://my-app.com |" >> $GITHUB_STEP_SUMMARY
